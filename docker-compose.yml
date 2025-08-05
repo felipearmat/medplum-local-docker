@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: medplum-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medplum
+      POSTGRES_PASSWORD: medplum
+      POSTGRES_DB: medplum
+    ports:
+      - "5432:5432"
+    command:
+      - "postgres"
+      - "-c"  # Allow external connections (make sure to secure this in production)
+      - "listen_addresses=*"
+      - "-c"  # Set default query timeout
+      - "statement_timeout=60000"
+      - "-c"  # Use consistent transaction isolation level
+      - "default_transaction_isolation=REPEATABLE READ"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - medplum-network
+
+  cache:
+    image: redis:7
+    container_name: medplum-redis
+    restart: unless-stopped
+    command: redis-server --requirepass medplum
+    ports:
+      - "6379:6379"
+    networks:
+      - medplum-network
+
+  server:
+    build:
+      context: ./medplum/packages/server
+      dockerfile: Dockerfile
+    container_name: medplum-server
+    restart: unless-stopped
+    depends_on:
+      - db
+      - cache
+    volumes:
+      - ./medplum.config.json:/usr/src/medplum/packages/server/medplum.config.json:ro
+    ports:
+      - "8103:8103"
+    environment:
+      MEDPLUM_BINARY_STORAGE: "file:./binary/"
+      MEDPLUM_MAX_BATCH_SIZE: "50mb"
+      MEDPLUM_VM_CONTEXT_BOTS_ENABLED: "true"
+      MEDPLUM_INTROSPECTION_ENABLED: "true"
+      MEDPLUM_SHUTDOWN_TIMEOUT_MILLISECONDS: 30000
+    networks:
+      - medplum-network
+
+  # Optional frontend — uncomment this one to use a local folder project
+  # app:
+  #   build:
+  #     context: ./app # Place your project inside this folder
+  #     dockerfile: Dockerfile
+  #   container_name: medplum-app
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - server
+  #   environment:
+  #     VITE_MEDPLUM_BASE_URL: http://medplum-server:8103/
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - medplum-network
+
+  # Optional frontend — uncomment this one to use the official Medplum UI
+  # app:
+  #   image: medplum/medplum-app:4.3
+  #   container_name: medplum-app
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - server
+  #   environment:
+  #     VITE_MEDPLUM_BASE_URL: http://medplum-server:8103/
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - medplum-network
+
+volumes:
+  postgres-data:
+
+# When running the project locally, it's recommended to use a dedicated
+# Docker network. This ensures proper communication between services and
+# avoids port conflicts with other projects or local applications.
+networks:
+  medplum-network:
+    driver: bridge
